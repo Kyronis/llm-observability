@@ -104,6 +104,7 @@ export default function TraceExplorerContent() {
   const [filterSessionId, setFilterSessionId] = useState('');
   const [filterFromTimestamp, setFilterFromTimestamp] = useState('');
   const [filterToTimestamp, setFilterToTimestamp] = useState('');
+  const [refreshToken, setRefreshToken] = useState(0);
 
   // Input state (local, not yet applied)
   const [inputName, setInputName] = useState('');
@@ -172,6 +173,7 @@ export default function TraceExplorerContent() {
   const applyFilters = useCallback(() => {
     setFilterName(inputName);
     setFilterSessionId(inputSessionId);
+    setRefreshToken((n) => n + 1);
     // fromTimestamp/toTimestamp are applied directly via datetime-local
   }, [inputName, inputSessionId]);
 
@@ -215,7 +217,7 @@ export default function TraceExplorerContent() {
         setLoading(false);
       }
     },
-    [projectId, filterName, filterSessionId, filterFromTimestamp, filterToTimestamp],
+    [projectId, filterName, filterSessionId, filterFromTimestamp, filterToTimestamp, refreshToken],
   );
 
   // Auto-fetch when applied filters change
@@ -358,14 +360,14 @@ export default function TraceExplorerContent() {
         <div className="flex items-center gap-2 ml-auto">
           <button
             onClick={applyFilters}
-            className="flex items-center justify-center gap-xs h-10 bg-primary text-on-primary font-body-sm text-body-sm px-md rounded-lg hover:bg-primary-container hover:text-on-primary-container transition-colors whitespace-nowrap"
+            className="flex items-center justify-center gap-xs h-10 bg-primary text-on-primary font-body-sm text-body-sm px-md rounded-lg hover:bg-primary-container hover:text-on-primary-container transition-colors whitespace-nowrap cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">search</span>
             Search
           </button>
           <button
             onClick={clearFilters}
-            className="flex items-center justify-center gap-xs h-10 bg-transparent border border-outline-variant text-on-surface-variant font-body-sm text-body-sm px-md rounded-lg hover:bg-surface-container transition-colors whitespace-nowrap"
+            className="flex items-center justify-center gap-xs h-10 bg-transparent border border-outline-variant text-on-surface-variant font-body-sm text-body-sm px-md rounded-lg hover:bg-surface-container transition-colors whitespace-nowrap cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">filter_clear</span>
             Clear

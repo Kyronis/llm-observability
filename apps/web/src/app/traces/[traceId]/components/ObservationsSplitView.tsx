@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ViewMode } from './ViewModeToggle';
@@ -137,18 +137,40 @@ interface ObservationsSplitViewProps {
 
 export default function ObservationsSplitView({ nodes, viewMode }: ObservationsSplitViewProps) {
   const [selectedNode, setSelectedNode] = useState<TraceNodeData | null>(nodes[0] ?? null);
+  const [hideSpan, setHideSpan] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try { return window.localStorage.getItem('trace-explorer:hide-span') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('trace-explorer:hide-span', String(hideSpan)); } catch { /* 忽略 */ }
+  }, [hideSpan]);
 
   if (nodes.length === 0) return null;
+
+  // 应用过滤：隐藏 SPAN 类型节点
+  const visibleNodes = hideSpan ? nodes.filter((n) => n.type !== 'SPAN') : nodes;
+  const visibleIds = new Set(visibleNodes.map((n) => n.id));
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // 查找最近的可见祖先节点（用于在隐藏 SPAN 时重新挂载其子树）
+  function findVisibleAncestor(parentId: string | null | undefined): string | null {
+    if (!parentId) return null;
+    if (visibleIds.has(parentId)) return parentId;
+    const parent = nodeById.get(parentId);
+    if (!parent) return null;
+    return findVisibleAncestor(parent.parentObservationId ?? null);
+  }
 
   // 构建树结构用于左侧缩进
   const childMap = new Map<string, TraceNodeData[]>();
   const roots: TraceNodeData[] = [];
 
-  for (const node of nodes) {
-    if (node.parentObservationId) {
-      const children = childMap.get(node.parentObservationId) ?? [];
+  for (const node of visibleNodes) {
+    const effectiveParent = findVisibleAncestor(node.parentObservationId ?? null);
+    if (effectiveParent) {
+      const children = childMap.get(effectiveParent) ?? [];
       children.push(node);
-      childMap.set(node.parentObservationId, children);
+      childMap.set(effectiveParent, children);
     } else {
       roots.push(node);
     }
@@ -172,9 +194,14 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
   }
   flatten(roots, 0);
 
+  // 实际用于渲染的选中节点：如果原选中节点被过滤隐藏，则回退到第一个可见节点
+  const effectiveSelected = selectedNode && visibleIds.has(selectedNode.id)
+    ? selectedNode
+    : (visibleNodes[0] ?? null);
+
   // 渲染左侧列表项
   const renderListItem = ({ node, depth }: { node: TraceNodeData; depth: number }) => {
-    const isSelected = selectedNode?.id === node.id;
+    const isSelected = effectiveSelected?.id === node.id;
     const icon = getTypeIcon(node.type);
     const color = getTypeColor(node.type);
     const slow = isSlowCall(node.latency);
@@ -204,7 +231,7 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
 
   // 渲染右侧详情
   const renderDetail = () => {
-    if (!selectedNode) {
+    if (!effectiveSelected) {
       return (
         <div className="flex items-center justify-center h-full text-gray-400 text-sm">
           Select a node to view details
@@ -212,7 +239,7 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
       );
     }
 
-    const node = selectedNode;
+    const node = effectiveSelected;
     const icon = getTypeIcon(node.type);
     const color = getTypeColor(node.type);
     const slow = isSlowCall(node.latency);
@@ -278,17 +305,42 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
   };
 
   return (
-    <div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white" style={{ minHeight: '600px' }}>
+    <div
+      className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
+      style={{ height: 'min(70vh, 1000px)', minHeight: '480px' }}
+    >
       {/* 左侧：节点列表 */}
-      <div className="w-1/3 min-w-[280px] max-w-[400px] border-r border-gray-200 flex flex-col bg-gray-50 overflow-y-auto">
-        <div className="px-3 py-2 border-b border-gray-200 bg-gray-100">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Observations</h3>
+      <div className="w-1/3 min-w-[280px] max-w-[400px] border-r border-gray-200 flex flex-col bg-gray-50">
+        <div className="px-3 py-2 border-b border-gray-200 bg-gray-100 shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Observations
+              <span className="ml-1.5 text-gray-400 normal-case font-normal">
+                ({visibleNodes.length}{hideSpan && visibleNodes.length !== nodes.length ? ` / ${nodes.length}` : ''})
+              </span>
+            </h3>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none" title="隐藏 SPAN 类型节点">
+              <span className="text-xs text-gray-500">Hide SPAN</span>
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={hideSpan}
+                  onChange={(e) => setHideSpan(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-7 h-4 bg-gray-300 rounded-full peer-checked:bg-blue-500 transition-colors" />
+                <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-3" />
+              </div>
+            </label>
+          </div>
         </div>
-        {flatList.map((item) => renderListItem(item))}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {flatList.map((item) => renderListItem(item))}
+        </div>
       </div>
 
       {/* 右侧：详情面板 */}
-      <div className="w-2/3 flex-1 flex flex-col bg-white overflow-y-auto">
+      <div className="w-2/3 flex-1 flex flex-col bg-white min-h-0 overflow-y-auto">
         {renderDetail()}
       </div>
     </div>
