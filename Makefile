@@ -13,6 +13,13 @@ dev: ## Start web dev server (kill port if occupied, then open browser)
 	@lsof -ti:$(PORT) | xargs kill -9 2>/dev/null || true
 	@pnpm --filter @llm-observability/web dev & sleep 3 && open http://localhost:$(PORT)
 
+LAN_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)
+
+dev-lan: ## Start web dev server bound to LAN and open the LAN URL
+	@lsof -ti:$(PORT) | xargs kill -9 2>/dev/null || true
+	@echo "LAN IP: $(LAN_IP)"
+	@pnpm --filter @llm-observability/web dev & sleep 3 && open http://$(LAN_IP):$(PORT)
+
 build: ## Build all packages
 	pnpm -r run build
 
