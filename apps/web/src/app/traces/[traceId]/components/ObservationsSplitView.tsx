@@ -77,7 +77,17 @@ function formatUsageCompact(usage: TraceNodeData['usage']): string | null {
 
 // ===== 右侧面板内容渲染 =====
 
-function DetailContent({ data, viewMode, label }: { data: unknown; viewMode: ViewMode; label: string }) {
+function DetailContent({
+  data,
+  viewMode,
+  label,
+  onExpand,
+}: {
+  data: unknown;
+  viewMode: ViewMode;
+  label: string;
+  onExpand?: (block: { content: string; partType: string; role: string; label: string }) => void;
+}) {
   if (data == null) return null;
 
   const rawJson = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
@@ -99,21 +109,34 @@ function DetailContent({ data, viewMode, label }: { data: unknown; viewMode: Vie
       <p className="text-xs font-semibold text-gray-500 mb-1.5">{label}</p>
       <div className="space-y-2">
         {blocks.map((block, idx) => (
-          <div key={idx} className={`border rounded-md p-3 text-sm ${getPartTypeStyle(block.partType)}`}>
+          <div key={idx} className={`group border rounded-md p-3 text-sm ${getPartTypeStyle(block.partType)}`}>
             {/* 标签行 */}
             <div className="flex items-center gap-1.5 mb-1.5">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPartTypeTagStyle(block.partType)}`}>
-                {getPartTypeLabel(block.partType)}
+              <span className="flex-1 flex items-center gap-1.5">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPartTypeTagStyle(block.partType)}`}>
+                  {getPartTypeLabel(block.partType)}
+                </span>
+                {block.role && block.role !== 'text' && block.role !== 'unknown' && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getRoleTagStyle(block.role)}`}>
+                    {getRoleLabel(block.role)}
+                  </span>
+                )}
+                {block.toolCall && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold bg-white border border-purple-300 text-purple-800">
+                    {block.toolCall.name}
+                  </span>
+                )}
               </span>
-              {block.role && block.role !== 'text' && block.role !== 'unknown' && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getRoleTagStyle(block.role)}`}>
-                  {getRoleLabel(block.role)}
-                </span>
-              )}
-              {block.toolCall && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold bg-white border border-purple-300 text-purple-800">
-                  {block.toolCall.name}
-                </span>
+              {(block.partType === 'reasoning' || block.partType === 'text') && onExpand && (
+                <button
+                  type="button"
+                  onClick={() => onExpand({ content: block.content, partType: block.partType, role: block.role, label })}
+                  className="p-1 rounded hover:bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  title="展开查看完整内容"
+                  aria-label="展开查看完整内容"
+                >
+                  <span className="material-symbols-outlined text-[16px]">open_in_full</span>
+                </button>
               )}
             </div>
             <div
@@ -128,6 +151,76 @@ function DetailContent({ data, viewMode, label }: { data: unknown; viewMode: Vie
   );
 }
 
+// ===== 展开内容覆盖层 =====
+
+type ExpandedBlock = {
+  content: string;
+  partType: string;
+  role: string;
+  label: string;
+};
+
+function ExpandedContentOverlay({
+  block,
+  onClose,
+}: {
+  block: ExpandedBlock;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* 遮罩层 */}
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      {/* 内容面板 */}
+      <div className="relative w-[95vw] max-w-6xl h-[85vh] bg-white rounded-lg shadow-2xl flex flex-col">
+        {/* 头部 */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getPartTypeTagStyle(block.partType)}`}>
+              {getPartTypeLabel(block.partType)}
+            </span>
+            {block.role && block.role !== 'text' && block.role !== 'unknown' && (
+              <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getRoleTagStyle(block.role)}`}>
+                {getRoleLabel(block.role)}
+              </span>
+            )}
+            <span className="text-sm text-gray-500 ml-1">{block.label}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+            title="关闭"
+            aria-label="关闭"
+          >
+            <span className="material-symbols-outlined text-[20px] text-gray-500">close</span>
+          </button>
+        </div>
+
+        {/* Markdown 内容区域 */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+          <div className="prose prose-sm max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ===== 主组件 =====
 
 interface ObservationsSplitViewProps {
@@ -137,6 +230,7 @@ interface ObservationsSplitViewProps {
 
 export default function ObservationsSplitView({ nodes, viewMode }: ObservationsSplitViewProps) {
   const [selectedNode, setSelectedNode] = useState<TraceNodeData | null>(nodes[0] ?? null);
+  const [expandedBlock, setExpandedBlock] = useState<ExpandedBlock | null>(null);
   const [hideSpan, setHideSpan] = useState(() => {
     if (typeof window === 'undefined') return false;
     try { return window.localStorage.getItem('trace-explorer:hide-span') === 'true'; } catch { return false; }
@@ -280,12 +374,12 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
 
         {/* Input */}
         {node.input != null && (
-          <DetailContent data={node.input} viewMode={viewMode} label="Input" />
+          <DetailContent data={node.input} viewMode={viewMode} label="Input" onExpand={setExpandedBlock} />
         )}
 
         {/* Output */}
         {node.output != null && (
-          <DetailContent data={node.output} viewMode={viewMode} label="Output" />
+          <DetailContent data={node.output} viewMode={viewMode} label="Output" onExpand={setExpandedBlock} />
         )}
 
         {/* Metadata */}
@@ -305,44 +399,49 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
   };
 
   return (
-    <div
-      className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
-      style={{ height: 'min(70vh, 1000px)', minHeight: '480px' }}
-    >
-      {/* 左侧：节点列表 */}
-      <div className="w-1/3 min-w-[280px] max-w-[400px] border-r border-gray-200 flex flex-col bg-gray-50">
-        <div className="px-3 py-2 border-b border-gray-200 bg-gray-100 shrink-0">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Observations
-              <span className="ml-1.5 text-gray-400 normal-case font-normal">
-                ({visibleNodes.length}{hideSpan && visibleNodes.length !== nodes.length ? ` / ${nodes.length}` : ''})
-              </span>
-            </h3>
-            <label className="flex items-center gap-1.5 cursor-pointer select-none" title="隐藏 SPAN 类型节点">
-              <span className="text-xs text-gray-500">Hide SPAN</span>
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  checked={hideSpan}
-                  onChange={(e) => setHideSpan(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-7 h-4 bg-gray-300 rounded-full peer-checked:bg-blue-500 transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-3" />
-              </div>
-            </label>
+    <>
+      <div
+        className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
+        style={{ height: 'min(70vh, 1000px)', minHeight: '480px' }}
+      >
+        {/* 左侧：节点列表 */}
+        <div className="w-1/3 min-w-[280px] max-w-[400px] border-r border-gray-200 flex flex-col bg-gray-50">
+          <div className="px-3 py-2 border-b border-gray-200 bg-gray-100 shrink-0">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Observations
+                <span className="ml-1.5 text-gray-400 normal-case font-normal">
+                  ({visibleNodes.length}{hideSpan && visibleNodes.length !== nodes.length ? ` / ${nodes.length}` : ''})
+                </span>
+              </h3>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none" title="隐藏 SPAN 类型节点">
+                <span className="text-xs text-gray-500">Hide SPAN</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={hideSpan}
+                    onChange={(e) => setHideSpan(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-7 h-4 bg-gray-300 rounded-full peer-checked:bg-blue-500 transition-colors" />
+                  <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-3" />
+                </div>
+              </label>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {flatList.map((item) => renderListItem(item))}
           </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {flatList.map((item) => renderListItem(item))}
+
+        {/* 右侧：详情面板 */}
+        <div className="w-2/3 flex-1 flex flex-col bg-white min-h-0 overflow-y-auto">
+          {renderDetail()}
         </div>
       </div>
-
-      {/* 右侧：详情面板 */}
-      <div className="w-2/3 flex-1 flex flex-col bg-white min-h-0 overflow-y-auto">
-        {renderDetail()}
-      </div>
-    </div>
+      {expandedBlock && (
+        <ExpandedContentOverlay block={expandedBlock} onClose={() => setExpandedBlock(null)} />
+      )}
+    </>
   );
 }
