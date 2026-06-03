@@ -8,6 +8,7 @@ import type { Observation } from '@llm-observability/shared/schemas/project';
 import ViewModeToggle, { type ViewMode } from './components/ViewModeToggle';
 import ObservationsSplitView, { type TraceNodeData } from './components/ObservationsSplitView';
 import { MetadataBlock } from './components/ContentBlock';
+import { aggregateTokenUsage } from './lib/usage';
 
 // ===== Types =====
 
@@ -152,6 +153,12 @@ export default function TraceDetailContent() {
     return result;
   }, [trace]);
 
+  // 汇总所有 observations 的 token 消耗
+  const tokenUsage = useMemo(() => {
+    if (!trace) return null;
+    return aggregateTokenUsage(extractObservations(trace.observations));
+  }, [trace]);
+
   if (loading) {
     return (
       <div className="w-full mx-auto px-md">
@@ -233,6 +240,14 @@ export default function TraceDetailContent() {
             <span className="material-symbols-outlined text-[16px] text-gray-500 shrink-0">fingerprint</span>
             <span className="text-gray-500 font-medium shrink-0">Session:</span>
             <span className="font-mono font-medium text-gray-800" title={trace.sessionId}>{trace.sessionId}</span>
+          </div>
+        )}
+        {tokenUsage && (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-sm" title="所有 observations 的 token 消耗汇总">
+            <span className="material-symbols-outlined text-[16px] text-gray-500 shrink-0">numbers</span>
+            <span className="text-gray-500 font-medium shrink-0">Tokens:</span>
+            <span className="font-mono font-medium text-gray-800">{tokenUsage.total}</span>
+            <span className="font-mono text-xs text-gray-500">↑{tokenUsage.input} ↓{tokenUsage.output}</span>
           </div>
         )}
         {trace.userId && (

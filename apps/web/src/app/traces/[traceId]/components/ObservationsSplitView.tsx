@@ -5,7 +5,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ViewMode } from './ViewModeToggle';
 import { extractContent, getRoleLabel, getRoleTagStyle, getPartTypeLabel, getPartTypeStyle, getPartTypeTagStyle, hasFormattableContent } from '../lib/format';
+import { formatUsagePill } from '../lib/usage';
 import { MetadataBlock } from './ContentBlock';
+import ExpandableText from './ExpandableText';
 import type { Observation } from '@llm-observability/shared/schemas/project';
 
 // ===== 统一节点类型 =====
@@ -19,7 +21,7 @@ export type TraceNodeData = {
   metadata?: unknown;
   latency: number | null; // 秒
   model?: string | null;
-  usage?: { promptTokens?: number | null; completionTokens?: number | null; totalTokens?: number | null } | null;
+  usage?: Record<string, unknown> | null;
   statusMessage?: string | null;
   parentObservationId?: string | null;
   /** 开始时间，用于排序 */
@@ -61,19 +63,18 @@ function getTypeColor(type: string): string {
   }
 }
 
-function formatUsageCompact(usage: TraceNodeData['usage']): string | null {
-  if (!usage) return null;
-  // 兼容两种字段名：promptTokens/input, completionTokens/output
-  const input = usage.promptTokens ?? (usage as Record<string, unknown>).input as number | null ?? null;
-  const output = usage.completionTokens ?? (usage as Record<string, unknown>).output as number | null ?? null;
-  const total = usage.totalTokens ?? (usage as Record<string, unknown>).total as number | null ?? null;
-  if (input == null && output == null && total == null) return null;
-  const parts: string[] = [];
-  if (input != null) parts.push(`in:${input.toLocaleString()}`);
-  if (output != null) parts.push(`out:${output.toLocaleString()}`);
-  if (total != null && input == null && output == null) parts.push(`total:${total.toLocaleString()}`);
-  return parts.join(' ');
+/** 卡片背景色（与 getPartTypeStyle 中的 bg-* 对应），用于 ExpandableText 渐变遮罩 */
+function getCardBgColor(partType: string): string {
+  switch (partType) {
+    case 'text':       return 'rgb(255, 255, 255)';
+    case 'reasoning':  return 'rgb(239, 246, 255)';
+    case 'tool_call':  return 'rgb(250, 245, 255)';
+    case 'fallback':   return 'rgb(249, 250, 251)';
+    default:           return 'rgb(255, 255, 255)';
+  }
 }
+
+// token 格式化已抽到 lib/usage
 
 // ===== 右侧面板内容渲染 =====
 
@@ -81,12 +82,10 @@ function DetailContent({
   data,
   viewMode,
   label,
-  onExpand,
 }: {
   data: unknown;
   viewMode: ViewMode;
   label: string;
-  onExpand?: (block: { content: string; partType: string; role: string; label: string }) => void;
 }) {
   if (data == null) return null;
 
@@ -96,7 +95,7 @@ function DetailContent({
     return (
       <div className="bg-gray-50 p-3 rounded-md">
         <p className="text-xs font-semibold text-gray-500 mb-1.5">{label}</p>
-        <pre className="font-mono text-xs text-gray-800 whitespace-pre-wrap break-words max-h-[240px] overflow-y-auto">
+        <pre className="font-mono text-xs text-gray-800 whitespace-pre-wrap break-words break-word max-h-[240px] overflow-y-auto">
           {rawJson}
         </pre>
       </div>
@@ -127,23 +126,14 @@ function DetailContent({
                   </span>
                 )}
               </span>
-              {(block.partType === 'reasoning' || block.partType === 'text') && onExpand && (
-                <button
-                  type="button"
-                  onClick={() => onExpand({ content: block.content, partType: block.partType, role: block.role, label })}
-                  className="p-1 rounded hover:bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                  title="展开查看完整内容"
-                  aria-label="展开查看完整内容"
-                >
-                  <span className="material-symbols-outlined text-[16px]">open_in_full</span>
-                </button>
-              )}
             </div>
-            <div
-              className={`prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 overflow-x-auto max-h-[360px] overflow-y-auto${block.partType === 'tool_call' ? ' text-base' : ''}`}
-            >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
-            </div>
+            <ExpandableText maskColor={getCardBgColor(block.partType)}>
+              <div
+                className={`prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 overflow-x-auto${block.partType === 'tool_call' ? ' text-base' : ''}`}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+              </div>
+            </ExpandableText>
           </div>
         ))}
       </div>
@@ -152,74 +142,6 @@ function DetailContent({
 }
 
 // ===== 展开内容覆盖层 =====
-
-type ExpandedBlock = {
-  content: string;
-  partType: string;
-  role: string;
-  label: string;
-};
-
-function ExpandedContentOverlay({
-  block,
-  onClose,
-}: {
-  block: ExpandedBlock;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-    };
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* 遮罩层 */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-
-      {/* 内容面板 */}
-      <div className="relative w-[95vw] max-w-6xl h-[85vh] bg-white rounded-lg shadow-2xl flex flex-col">
-        {/* 头部 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getPartTypeTagStyle(block.partType)}`}>
-              {getPartTypeLabel(block.partType)}
-            </span>
-            {block.role && block.role !== 'text' && block.role !== 'unknown' && (
-              <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getRoleTagStyle(block.role)}`}>
-                {getRoleLabel(block.role)}
-              </span>
-            )}
-            <span className="text-sm text-gray-500 ml-1">{block.label}</span>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-            title="关闭"
-            aria-label="关闭"
-          >
-            <span className="material-symbols-outlined text-[20px] text-gray-500">close</span>
-          </button>
-        </div>
-
-        {/* Markdown 内容区域 */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-          <div className="prose prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ===== 主组件 =====
 
@@ -230,7 +152,6 @@ interface ObservationsSplitViewProps {
 
 export default function ObservationsSplitView({ nodes, viewMode }: ObservationsSplitViewProps) {
   const [selectedNode, setSelectedNode] = useState<TraceNodeData | null>(nodes[0] ?? null);
-  const [expandedBlock, setExpandedBlock] = useState<ExpandedBlock | null>(null);
   const [hideSpan, setHideSpan] = useState(() => {
     if (typeof window === 'undefined') return false;
     try { return window.localStorage.getItem('trace-explorer:hide-span') === 'true'; } catch { return false; }
@@ -338,7 +259,7 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
     const color = getTypeColor(node.type);
     const slow = isSlowCall(node.latency);
     const duration = formatDuration(node.latency);
-    const usageInfo = formatUsageCompact(node.usage);
+    const usageInfo = formatUsagePill(node.usage);
 
     // 统一的 pill 标签样式
     const pill = 'px-2 py-0.5 rounded text-xs font-medium';
@@ -374,12 +295,12 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
 
         {/* Input */}
         {node.input != null && (
-          <DetailContent data={node.input} viewMode={viewMode} label="Input" onExpand={setExpandedBlock} />
+          <DetailContent data={node.input} viewMode={viewMode} label="Input" />
         )}
 
         {/* Output */}
         {node.output != null && (
-          <DetailContent data={node.output} viewMode={viewMode} label="Output" onExpand={setExpandedBlock} />
+          <DetailContent data={node.output} viewMode={viewMode} label="Output" />
         )}
 
         {/* Metadata */}
@@ -439,9 +360,6 @@ export default function ObservationsSplitView({ nodes, viewMode }: ObservationsS
           {renderDetail()}
         </div>
       </div>
-      {expandedBlock && (
-        <ExpandedContentOverlay block={expandedBlock} onClose={() => setExpandedBlock(null)} />
-      )}
     </>
   );
 }
