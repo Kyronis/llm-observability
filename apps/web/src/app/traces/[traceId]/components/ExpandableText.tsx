@@ -26,8 +26,13 @@ export default function ExpandableText({ children, maxHeight = 240, maskColor }:
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setOverflows(el.scrollHeight > maxHeight + 1);
-  }, [children, maxHeight]);
+    // 测量真实内容高度（不受当前 maxHeight 影响）
+    const prevMaxHeight = el.style.maxHeight;
+    el.style.maxHeight = 'none';
+    const contentHeight = el.scrollHeight;
+    el.style.maxHeight = prevMaxHeight;
+    setOverflows(contentHeight > maxHeight + 1);
+  }, [children, maxHeight, expanded]);
 
   const cssVars = { '--card-bg-color': maskColor } as CSSProperties;
 
@@ -36,7 +41,7 @@ export default function ExpandableText({ children, maxHeight = 240, maskColor }:
       <div
         ref={ref}
         className="overflow-hidden transition-[max-height] duration-300 ease-out"
-        style={{ maxHeight: expanded ? '2400px' : `${maxHeight}px` }}
+        style={{ maxHeight: expanded ? 'none' : `${maxHeight}px` }}
       >
         {children}
       </div>
