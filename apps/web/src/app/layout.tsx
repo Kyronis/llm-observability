@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import SideNavBar from '@/components/SideNavBar';
 import TopNavBar from '@/components/TopNavBar';
+import { ToastProvider } from '@/lib/toast';
 
 export const metadata: Metadata = {
   title: 'LLM Observability',
@@ -22,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <TopNavBar />
           <main className="flex-1 overflow-y-auto p-margin-desktop bg-background">
-            {children}
+            <ToastProvider>{children}</ToastProvider>
           </main>
         </div>
       </body>

@@ -9,6 +9,8 @@ import ViewModeToggle, { type ViewMode } from './components/ViewModeToggle';
 import ObservationsSplitView, { type TraceNodeData } from './components/ObservationsSplitView';
 import { MetadataBlock } from './components/ContentBlock';
 import { aggregateTokenUsage } from './lib/usage';
+import { generateMarkdownTrace } from './lib/markdown';
+import { useToast } from '@/lib/toast';
 
 // ===== Types =====
 
@@ -110,6 +112,23 @@ export default function TraceDetailContent() {
     }
   };
 
+  // 复制整个 trace 为 Markdown（用于喂给 LLM 分析）
+  const toast = useToast();
+  const handleCopyMarkdown = async () => {
+    if (!trace) return;
+    try {
+      const markdown = generateMarkdownTrace(trace);
+      if (typeof navigator === 'undefined' || !navigator.clipboard) {
+        throw new Error('Clipboard API unavailable in this environment');
+      }
+      await navigator.clipboard.writeText(markdown);
+      toast.success('Trace copied to clipboard in Markdown format.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown clipboard error';
+      toast.error(`Failed to copy: ${msg}`);
+    }
+  };
+
   // 构建统一节点列表：根 Trace + 所有 Observations
   const nodes: TraceNodeData[] = useMemo(() => {
     if (!trace) return [];
@@ -208,6 +227,14 @@ export default function TraceDetailContent() {
         </div>
         <div className="flex items-center gap-3">
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          <button
+            onClick={handleCopyMarkdown}
+            title="Copy Trace for LLM Analysis"
+            className="flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-sm py-1 px-3 rounded-md hover:bg-gray-50 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">content_copy</span>
+            Copy as MD
+          </button>
           <button
             onClick={handleBack}
             className="flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-sm py-1 px-3 rounded-md hover:bg-gray-50 transition-colors"
